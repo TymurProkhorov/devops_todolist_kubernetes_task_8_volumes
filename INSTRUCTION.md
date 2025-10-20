@@ -1,43 +1,73 @@
-## Instructions to validate the todoapp-deployment
+# Instructions to validate the Kubernetes deployment
 
-### Verify that the application is running
+All commands assume the namespace `todoapp`.
 
-Check that all pods in the `todoapp` namespace are running:
+---
+
+## 1. Identify a running pod automatically
+
+Use this command to get the name of a running pod with the main app:
+
+
+    POD=$(kubectl get pods -n todoapp -l app=kube2py -o jsonpath='{.items[0].metadata.name}')
+    echo "Using pod: $POD"
+
+## 2. Verify that the application is running
+Check pod status:
+
 
     kubectl get pods -n todoapp
-You should see all pods with STATUS = Running and READY = 1/1 (or appropriate count if multiple containers).
+You should see STATUS=Running and READY=1/1 (or correct count for multi-container pods).
 
+Check logs to ensure the app started successfully:
 
-## Validate that ConfigMap data is mounted as file
+    kubectl logs $POD -n todoapp
 
-### 1. Exec into a running pod:
+## 3. Verify PVC-backed mount at /app/data
+Exec into the pod:
 
-    kubectl exec -it $(kubectl get pods -n todoapp -l app=kube2py -o jsonpath='{.items[0].metadata.name}') -n todoapp -- /bin/sh
+    kubectl exec -it $POD -n todoapp -- /bin/sh
+Navigate to the PV mount path:
 
-### 2. Navigate to the mount path for the ConfigMap
-
-    cd /app/configs
+    cd /app/data
     ls -l
+Create a test file and verify persistence:
 
-You should see files corresponding to the keys in your ConfigMap.
+    echo "hello" > test.txt
+    cat test.txt
+Exit pod, delete it, and verify that the file persists:
 
-### 3. Check that the file contents match the values in your ConfigMap:
-    cat PYTHONUNBUFFERED
-Repeat for all files to verify they are mounted in the correct order if order matters.
+    kubectl delete pod $POD -n todoapp
+    POD=$(kubectl get pods -n todoapp -l app=kube2py -o jsonpath='{.items[0].metadata.name}')
+    kubectl exec -it $POD -n todoapp -- cat /app/data/test.txt
+If you see hello, PVC is working correctly.
 
+## 4. Verify ConfigMap mount is read-only
+Exec into the pod:
 
-## Validate that Secrets is mounted as files
+    kubectl exec -it $POD -n todoapp -- /bin/sh
+Navigate to the ConfigMap mount path (adjust if different):
 
-### 1. Exec into a running pod:
-
-    kubectl exec -it <pod-name> -n todoapp -- /bin/sh
-
-### 2. Navigate to the mount path for the Secret
-
-    cd /app/secrets
+    cd /app/config
     ls -l
+You should see files corresponding to all keys in configMap.yml.
+List keys from Kubernetes for verification:
 
-You should see files corresponding to the keys in your secret.
+    kubectl get configmap -n todoapp -o jsonpath='{.items[?(@.metadata.name=="todoapp-config")].data}' 
+Test that the mount is read-only:
 
-### 3. Check that the file contents match the values in your Secret:
-    cat SECRET_KEY
+    echo "test" > test.txt
+Should fail with "Read-only file system"
+## 5. Verify Secret mount is read-only
+Navigate to the Secret mount path (adjust if different):
+
+    cd /app/secret
+    ls -l
+You should see files corresponding to all keys in secret.yml.
+List keys from Kubernetes for verification:
+
+    kubectl get secret -n todoapp -o jsonpath='{.items[?(@.metadata.name=="todoapp-secret")].data}' | jq 'keys'
+Test that the mount is read-only:
+
+    echo "test" > test.txt
+Should fail with "Read-only file system"
